@@ -21,19 +21,6 @@ bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher()
 crypto = AioCryptoPay(token=config.CRYPTO_BOT_TOKEN, network=Networks.MAIN_NET)
 
-# ==========================================
-# --- ID PREMIUM ЭМОДЗИ ДЛЯ КНОПОК ---
-# ==========================================
-E_CATALOG = "5368324170671202286"
-E_PROFILE = "5368324170671202286"
-E_DEPOSIT = "5368324170671202286"
-E_SUPPORT = "5368324170671202286"
-E_ABOUT =   "5368324170671202286"
-E_SUCCESS = "5368324170671202286" 
-E_DANGER =  "5368324170671202286" 
-E_BACK =    "5368324170671202286" 
-E_DEFAULT = "5368324170671202286" 
-
 # --- Парсинг курса ЦБ РФ ---
 async def get_usd_rate() -> float:
     url = "https://cbr.ru/scripts/XML_daily.asp"
@@ -341,7 +328,12 @@ async def show_orders(call: CallbackQuery):
     e_cat = ui.get('E_CATALOG')
     text = f"<tg-emoji emoji-id=\"{e_cat}\">📦</tg-emoji> <b>Ваши последние 5 покупок:</b>\n\n"
     for order in orders:
-        text += f"🔹 <b>{order['product_name']}</b> ({order['price']}₽)\n📅 {order['dt']}\n🔑 <code>{order['content']}</code>\n\n"
+        text += f"🔹 <b>{order['product_name']}</b> ({order['price']}₽)\n📅 {order['dt']}\n"
+        if order['content_type'] == 'text':
+            text += f"🔑 <code>{order['content']}</code>\n\n"
+        else:
+            text += f"📁 [Файл отправлен в чат]\n\n"
+            
     kb = [[InlineKeyboardButton(text="Назад в профиль", callback_data="nav_profile", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "profile.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
 
@@ -468,19 +460,36 @@ async def confirm_buy(call: CallbackQuery, state: FSMContext):
     product_id = data.get('buy_product_id')
     promo_code = data.get('applied_promo')
     if not product_id: return await call.answer("Ошибка сессии.", show_alert=True)
+    product = db.get_product(product_id)
+    if not product: return await call.answer("Товар удален.", show_alert=True)
+         
+    success, result, c_type, immediate_wins, final_price = db.buy_item(call.from_user.id, product_id, promo_code)
     
-    success, result, immediate_wins, final_price = db.buy_item(call.from_user.id, product_id, promo_code)
     if success:
-        await call.message.answer(f"✅ Покупка успешна! Списано <b>{final_price} руб.</b>\n\nВаш товар:\n<code>{result}</code>", parse_mode="HTML")
+        await call.message.answer(f"✅ Покупка успешна! Списано <b>{final_price} руб.</b>\n\nВаш товар ниже:", parse_mode="HTML")
+        
+        # Выдаем файл или текст
+        if c_type == 'text':
+            await call.message.answer(f"<code>{result}</code>", parse_mode="HTML")
+        elif c_type == 'document':
+            await call.message.answer_document(result)
+        elif c_type == 'photo':
+            await call.message.answer_photo(result)
+        elif c_type == 'video':
+            await call.message.answer_video(result)
+        elif c_type == 'audio':
+            await call.message.answer_audio(result)
+            
         await call.message.delete()
         await state.clear()
+        
         for ga in immediate_wins:
             if ga['prize_type'] == 'promo':
                 promo_gen = f"FIRST-{str(uuid.uuid4())[:6].upper()}"
                 db.add_promocode(promo_gen, 'discount', ga['prize_value'], 1)
                 await call.message.answer(f"🎁 <b>СЮРПРИЗ!</b> Вы стали ПЕРВЫМ покупателем!\nПромокод на скидку: <code>{promo_gen}</code>", parse_mode="HTML")
             else:
-                await call.message.answer(f"🎁 <b>СЮРПРИЗ!</b> ПЕРВЫЙ покупатель!\nНа балан зачислен бонус: <b>{ga['prize_value']} руб.</b>", parse_mode="HTML")
+                await call.message.answer(f"🎁 <b>СЮРПРИЗ!</b> ПЕРВЫЙ покупатель!\nНа баланс зачислен бонус: <b>{ga['prize_value']} руб.</b>", parse_mode="HTML")
     else:
         await call.answer(f"❌ Ошибка: {result}", show_alert=True)
 
@@ -781,14 +790,24 @@ async def admin_toggle_infinite(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("edit_inf_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_edit_inf_content(call: CallbackQuery, state: FSMContext):
     await state.update_data(edit_product_id=int(call.data.split("_")[2]))
-    await call.message.answer("Отправьте текст/ссылку для бесконечного товара:")
+    await call.message.answer("Отправьте текст, фото, документ, аудио или видео для бесконечного товара:")
     await state.set_state(AdminEditProductState.waiting_for_infinite_content)
 
 @dp.message(AdminEditProductState.waiting_for_infinite_content, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_save_inf_content(message: Message, state: FSMContext):
     data = await state.get_data()
-    db.update_product_field(data['edit_product_id'], 'infinite_content', message.text)
-    await message.answer("✅ Обновлено.")
+    prod_id = data['edit_product_id']
+    content, c_type = None, 'text'
+    if message.document: content, c_type = message.document.file_id, 'document'
+    elif message.photo: content, c_type = message.photo[-1].file_id, 'photo'
+    elif message.video: content, c_type = message.video.file_id, 'video'
+    elif message.audio: content, c_type = message.audio.file_id, 'audio'
+    elif message.text: content, c_type = message.text, 'text'
+    
+    if not content: return await message.answer("❌ Отправьте текст, фото, видео, аудио или документ.")
+    db.update_product_field(prod_id, 'infinite_content', content)
+    db.update_product_field(prod_id, 'infinite_content_type', c_type)
+    await message.answer(f"✅ Обновлено ({c_type}).")
     await state.clear()
 
 @dp.callback_query(F.data.startswith("edit_prod_"), F.from_user.id.in_(config.ADMIN_IDS))
@@ -854,7 +873,7 @@ async def admin_delete_product(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("add_items_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_items_start(call: CallbackQuery, state: FSMContext):
     await state.update_data(product_id=int(call.data.split("_")[2]))
-    await call.message.answer("Отправьте данные (одно сообщение = один товар).\nДля завершения: /stop")
+    await call.message.answer("Отправьте текст, фото, видео, файл или документ.\nОдно сообщение = одна единица товара.\nДля завершения: /stop")
     await state.set_state(AdminItemState.waiting_for_content)
 
 @dp.message(AdminItemState.waiting_for_content, F.from_user.id.in_(config.ADMIN_IDS))
@@ -862,9 +881,18 @@ async def admin_add_items_process(message: Message, state: FSMContext):
     if message.text == "/stop":
         await message.answer("✅ Загрузка завершена.")
         return await state.clear()
+    
     data = await state.get_data()
-    db.add_item(data['product_id'], message.text)
-    await message.answer("Добавлено. Следующий или /stop")
+    content, c_type = None, 'text'
+    if message.document: content, c_type = message.document.file_id, 'document'
+    elif message.photo: content, c_type = message.photo[-1].file_id, 'photo'
+    elif message.video: content, c_type = message.video.file_id, 'video'
+    elif message.audio: content, c_type = message.audio.file_id, 'audio'
+    elif message.text: content, c_type = message.text, 'text'
+    
+    if not content: return await message.answer("❌ Отправьте текст, фото, видео, аудио или документ.")
+    db.add_item(data['product_id'], content, c_type)
+    await message.answer(f"Добавлено ({c_type}). Следующий или /stop")
 
 @dp.message(F.text == "Промокоды", F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_promocodes(message: Message):
@@ -1034,16 +1062,6 @@ async def admin_ga_finish(message: Message, state: FSMContext):
     await message.answer("✅ Розыгрыш создан.")
     await state.clear()
 
-
-@dp.message(F.from_user.id.in_(config.ADMIN_IDS))
-async def admin_catch_all_emoji_and_stickers(message: Message, state: FSMContext):
-    if await state.get_state() is not None: return 
-    if message.sticker:
-        return await message.answer(f"✅ <b>СТИКЕР!</b> ID:\n<code>{message.sticker.file_id}</code>\nВставлять так:\n<code>await message.answer_sticker(\"{message.sticker.file_id}\")</code>", parse_mode="HTML")
-    custom_emojis = [ent for ent in message.entities or [] if ent.type == "custom_emoji"]
-    if custom_emojis:
-        codes = "\n\n".join([f'&lt;tg-emoji emoji-id="{e.custom_emoji_id}"&gt;💳&lt;/tg-emoji&gt;' for e in custom_emojis])
-        return await message.answer(f"✅ <b>Эмодзи найдены!</b>\n\n<code>{codes}</code>", parse_mode="HTML")
 
 async def check_giveaways_task(bot_instance: Bot):
     while True:

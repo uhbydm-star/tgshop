@@ -37,15 +37,16 @@ def init_db():
     cat_cols = [row['name'] for row in c.fetchall()]
     if 'emoji_id' not in cat_cols: c.execute("ALTER TABLE categories ADD COLUMN emoji_id TEXT")
 
-    # 4. ТОВАРЫ
+    # 4. ТОВАРЫ (добавлен тип для бесконечного контента)
     c.execute('''CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER, name TEXT, description TEXT, price REAL)''')
     c.execute("PRAGMA table_info(products)")
     prod_cols = [row['name'] for row in c.fetchall()]
     if 'emoji_id' not in prod_cols: c.execute("ALTER TABLE products ADD COLUMN emoji_id TEXT")
     if 'is_infinite' not in prod_cols: c.execute("ALTER TABLE products ADD COLUMN is_infinite INTEGER DEFAULT 0")
     if 'infinite_content' not in prod_cols: c.execute("ALTER TABLE products ADD COLUMN infinite_content TEXT")
+    if 'infinite_content_type' not in prod_cols: c.execute("ALTER TABLE products ADD COLUMN infinite_content_type TEXT DEFAULT 'text'")
 
-    # 5. НАСТРОЙКИ UI (НОВАЯ ТАБЛИЦА ДЛЯ ЭМОДЗИ)
+    # 5. НАСТРОЙКИ UI
     c.execute('''CREATE TABLE IF NOT EXISTS ui_settings (
                     key TEXT PRIMARY KEY,
                     emoji_id TEXT)''')
@@ -64,12 +65,22 @@ def init_db():
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO ui_settings (key, emoji_id) VALUES (?, ?)", (k, v))
 
-    # Остальные таблицы
+    # 6. СКЛАД ТОВАРОВ (добавлен тип файла)
     c.execute('''CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, content TEXT)''')
+    c.execute("PRAGMA table_info(items)")
+    item_cols = [row['name'] for row in c.fetchall()]
+    if 'content_type' not in item_cols: c.execute("ALTER TABLE items ADD COLUMN content_type TEXT DEFAULT 'text'")
+
+    # 7. ЗАКАЗЫ И ПОПОЛНЕНИЯ
     c.execute('''CREATE TABLE IF NOT EXISTS used_promos (user_id INTEGER, promo_id INTEGER, PRIMARY KEY (user_id, promo_id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS giveaways (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, target_val REAL, end_time INTEGER, winners_count INTEGER, prize_type TEXT, prize_value REAL, is_active INTEGER DEFAULT 1)''')
     c.execute('''CREATE TABLE IF NOT EXISTS giveaway_participants (giveaway_id INTEGER, user_id INTEGER, UNIQUE(giveaway_id, user_id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, product_name TEXT, price REAL, content TEXT, date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute("PRAGMA table_info(orders)")
+    order_cols = [row['name'] for row in c.fetchall()]
+    if 'content_type' not in order_cols: c.execute("ALTER TABLE orders ADD COLUMN content_type TEXT DEFAULT 'text'")
+    
     c.execute('''CREATE TABLE IF NOT EXISTS deposit_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, method TEXT, date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
     conn.commit()
@@ -161,7 +172,7 @@ def get_user_deposits(user_id, limit=5):
 def get_user_orders(user_id, limit=5):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT product_name, price, content, datetime(date_time, 'localtime') as dt FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
+    c.execute("SELECT product_name, price, content, content_type, datetime(date_time, 'localtime') as dt FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
     orders = [dict(row) for row in c.fetchall()]
     conn.close()
     return orders
@@ -246,7 +257,7 @@ def get_product(product_id):
 def update_product_field(product_id, field, value):
     conn = get_connection()
     c = conn.cursor()
-    allowed_fields = ['name', 'description', 'price', 'emoji_id', 'is_infinite', 'infinite_content']
+    allowed_fields = ['name', 'description', 'price', 'emoji_id', 'is_infinite', 'infinite_content', 'infinite_content_type']
     if field in allowed_fields:
         c.execute(f"UPDATE products SET {field} = ? WHERE id = ?", (value, product_id))
         conn.commit()
@@ -271,10 +282,10 @@ def delete_product(product_id):
     conn.commit()
     conn.close()
 
-def add_item(product_id, content):
+def add_item(product_id, content, content_type='text'):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("INSERT INTO items (product_id, content) VALUES (?, ?)", (product_id, content))
+    c.execute("INSERT INTO items (product_id, content, content_type) VALUES (?, ?, ?)", (product_id, content, content_type))
     conn.commit()
     conn.close()
 
@@ -286,53 +297,54 @@ def buy_item(user_id, product_id, promo_code=None):
     prod = c.fetchone()
     if not prod:
         conn.close()
-        return False, "Товар не найден.", [], 0
+        return False, "Товар не найден.", None, [], 0
         
     price = prod['price']
     final_price = price
     
-    # Обработка промокода
     promo_data = None
     if promo_code:
         c.execute("SELECT * FROM promocodes WHERE code = ?", (promo_code,))
         promo_data = c.fetchone()
         if not promo_data:
             conn.close()
-            return False, "Промокод не найден.", [], 0
+            return False, "Промокод не найден.", None, [], 0
         if promo_data['uses_left'] <= 0:
             conn.close()
-            return False, "Активации этого промокода закончились.", [], 0
+            return False, "Активации этого промокода закончились.", None, [], 0
         c.execute("SELECT 1 FROM used_promos WHERE user_id = ? AND promo_id = ?", (user_id, promo_data['id']))
         if c.fetchone():
             conn.close()
-            return False, "Вы уже использовали этот промокод.", [], 0
+            return False, "Вы уже использовали этот промокод.", None, [], 0
         final_price = max(0, price - promo_data['discount'])
     
-    # Проверка баланса
     c.execute("SELECT balance FROM users WHERE id = ?", (user_id,))
     balance = c.fetchone()['balance']
     if balance < final_price:
         conn.close()
-        return False, f"Недостаточно средств. Цена товара: {final_price} руб.", [], 0
+        return False, f"Недостаточно средств. Цена товара: {final_price} руб.", None, [], 0
     
     item_content = ""
+    item_content_type = "text"
+
     if prod['is_infinite']:
         if not prod['infinite_content']:
             conn.close()
-            return False, "Содержимое этого товара еще не настроено администратором.", [], 0
+            return False, "Содержимое этого товара еще не настроено администратором.", None, [], 0
         item_content = prod['infinite_content']
+        item_content_type = prod['infinite_content_type']
     else:
-        c.execute("SELECT id, content FROM items WHERE product_id = ? LIMIT 1", (product_id,))
+        c.execute("SELECT id, content, content_type FROM items WHERE product_id = ? LIMIT 1", (product_id,))
         item = c.fetchone()
         if not item:
             conn.close()
-            return False, "Товар закончился.", [], 0
+            return False, "Товар закончился.", None, [], 0
         item_content = item['content']
+        item_content_type = item['content_type']
         c.execute("DELETE FROM items WHERE id = ?", (item['id'],))
     
-    # Списание средств
     c.execute("UPDATE users SET balance = balance - ?, purchases = purchases + 1, spent = spent + ? WHERE id = ?", (final_price, final_price, user_id))
-    c.execute("INSERT INTO orders (user_id, product_name, price, content) VALUES (?, ?, ?, ?)", (user_id, prod['name'], final_price, item_content))
+    c.execute("INSERT INTO orders (user_id, product_name, price, content, content_type) VALUES (?, ?, ?, ?, ?)", (user_id, prod['name'], final_price, item_content, item_content_type))
 
     if promo_data:
         c.execute("UPDATE promocodes SET uses_left = uses_left - 1 WHERE id = ?", (promo_data['id'],))
@@ -354,7 +366,7 @@ def buy_item(user_id, product_id, promo_code=None):
 
     conn.commit()
     conn.close()
-    return True, item_content, immediate_wins, final_price
+    return True, item_content, item_content_type, immediate_wins, final_price
 
 # --- Промокоды ---
 def add_promocode(code, promo_type, discount, uses):
