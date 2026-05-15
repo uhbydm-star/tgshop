@@ -92,7 +92,6 @@ def get_statistics():
     c = conn.cursor()
     stats = {}
     
-    # Считаем за 7, 15, 30 дней
     for days in [7, 15, 30]:
         c.execute(f"SELECT SUM(amount) as total FROM deposit_history WHERE date_time >= datetime('now', '-{days} days')")
         dep_total = c.fetchone()['total'] or 0
@@ -324,7 +323,6 @@ def buy_item(user_id, product_id, promo_code=None):
     price = prod['price']
     final_price = price
     
-    # Обработка промокода
     promo_data = None
     if promo_code:
         c.execute("SELECT * FROM promocodes WHERE code = ?", (promo_code,))
@@ -341,7 +339,6 @@ def buy_item(user_id, product_id, promo_code=None):
             return False, "Вы уже использовали этот промокод.", None, [], 0, 0
         final_price = max(0, price - promo_data['discount'])
     
-    # Проверка баланса
     c.execute("SELECT balance FROM users WHERE id = ?", (user_id,))
     balance = c.fetchone()['balance']
     if balance < final_price:
@@ -369,7 +366,6 @@ def buy_item(user_id, product_id, promo_code=None):
     
     c.execute("UPDATE users SET balance = balance - ?, purchases = purchases + 1, spent = spent + ? WHERE id = ?", (final_price, final_price, user_id))
     
-    # Добавляем заказ и получаем его ID
     c.execute("INSERT INTO orders (user_id, product_name, price, content, content_type) VALUES (?, ?, ?, ?, ?)", (user_id, prod['name'], final_price, item_content, item_content_type))
     order_id = c.lastrowid
 

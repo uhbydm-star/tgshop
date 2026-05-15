@@ -238,29 +238,21 @@ async def cmd_start(message: Message, state: FSMContext):
         return
 
     photo = FSInputFile("image_af4e21.jpg")
-    await message.answer_photo(
-        photo=photo, 
-        caption=get_main_menu_text(message.from_user.first_name), 
-        reply_markup=inline_main_menu(), 
-        parse_mode="HTML"
-    )
+    await message.answer_photo(photo=photo, caption=get_main_menu_text(message.from_user.first_name), reply_markup=inline_main_menu(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "accept_offer")
 async def process_accept_offer(call: CallbackQuery):
     db.accept_offer(call.from_user.id)
     photo = FSInputFile("image_af4e21.jpg")
     await call.message.delete()
-    await call.message.answer_photo(
-        photo=photo, 
-        caption=get_main_menu_text(call.from_user.first_name), 
-        reply_markup=inline_main_menu(), 
-        parse_mode="HTML"
-    )
+    await call.message.answer_photo(photo=photo, caption=get_main_menu_text(call.from_user.first_name), reply_markup=inline_main_menu(), parse_mode="HTML")
+    await call.answer()
 
 @dp.callback_query(F.data == "nav_main")
 async def edit_to_main_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await safe_media_switch(call, "image_af4e21.jpg", get_main_menu_text(call.from_user.first_name), inline_main_menu())
+    await call.answer()
 
 @dp.callback_query(F.data == "nav_support")
 async def show_support(call: CallbackQuery):
@@ -270,6 +262,7 @@ async def show_support(call: CallbackQuery):
     kb = [[InlineKeyboardButton(text="Написать в поддержку", url="https://t.me/manager_opiuma", icon_custom_emoji_id=e_sup)], 
           [InlineKeyboardButton(text="Назад", callback_data="nav_main", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "support.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data == "nav_about")
 async def show_about(call: CallbackQuery):
@@ -286,6 +279,7 @@ async def show_about(call: CallbackQuery):
     kb = [[InlineKeyboardButton(text="Заказать такого бота", url="https://t.me/uhbyfc", icon_custom_emoji_id=ui.get('E_DEFAULT'))], 
           [InlineKeyboardButton(text="Назад", callback_data="nav_main", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "about.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 # ==========================================
 # --- ПРОФИЛЬ ---
@@ -307,6 +301,7 @@ async def show_profile(call: CallbackQuery):
         f"<tg-emoji emoji-id=\"{e_dep}\">💸</tg-emoji> Потрачено: <b>{user['spent']}₽</b>"
     )
     await safe_media_switch(call, "profile.jpg", text, inline_profile_menu(user['notifications']))
+    await call.answer()
 
 @dp.callback_query(F.data == "profile_notifs")
 async def toggle_notifications(call: CallbackQuery):
@@ -331,6 +326,7 @@ async def show_orders(call: CallbackQuery):
             
     kb = [[InlineKeyboardButton(text="Назад в профиль", callback_data="nav_profile", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "profile.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data == "profile_history")
 async def show_deposit_history(call: CallbackQuery):
@@ -342,6 +338,7 @@ async def show_deposit_history(call: CallbackQuery):
         text += f"🔹 <b>{dep['amount']}₽</b> ({dep['method']})\n📅 {dep['dt']}\n\n"
     kb = [[InlineKeyboardButton(text="Назад в профиль", callback_data="nav_profile", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "profile.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data == "profile_promo")
 async def profile_promo_start(call: CallbackQuery, state: FSMContext):
@@ -350,6 +347,7 @@ async def profile_promo_start(call: CallbackQuery, state: FSMContext):
     kb = [[InlineKeyboardButton(text="Назад в профиль", callback_data="nav_profile", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "profile.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
     await state.set_state(ProfilePromoState.waiting_for_code)
+    await call.answer()
 
 @dp.message(ProfilePromoState.waiting_for_code)
 async def profile_promo_process(message: Message, state: FSMContext):
@@ -373,6 +371,7 @@ async def show_categories(call: CallbackQuery):
         kb.append([InlineKeyboardButton(text=f"{cat['name']}", callback_data=f"show_cat_{cat['id']}", icon_custom_emoji_id=e_id)])
     kb.append([InlineKeyboardButton(text="Назад", callback_data="nav_main", icon_custom_emoji_id=ui.get('E_BACK'))])
     await safe_media_switch(call, "catalog.jpg", f"<tg-emoji emoji-id=\"{ui.get('E_CATALOG')}\">🛍</tg-emoji> <b>Выберите категорию:</b>", InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("show_cat_"))
 async def show_products_in_cat(call: CallbackQuery):
@@ -388,6 +387,7 @@ async def show_products_in_cat(call: CallbackQuery):
         kb.append([InlineKeyboardButton(text=f"{p['name']} | {p['price']}₽ | Шт: {stock_text}", callback_data=f"buy_{p['id']}", icon_custom_emoji_id=e_id)])
     kb.append([InlineKeyboardButton(text="Назад в категории", callback_data="nav_catalog", icon_custom_emoji_id=ui.get('E_BACK'))])
     await safe_media_switch(call, "catalog.jpg", f"Категория: <b>{cat['name']}</b>", InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(call: CallbackQuery, state: FSMContext):
@@ -405,6 +405,7 @@ async def process_buy(call: CallbackQuery, state: FSMContext):
     stock_text = "∞ (Бесконечный товар)" if product['is_infinite'] else f"{product['stock']} шт."
     text = f"<b>{product['name']}</b>\n\nОписание:\n{product['description']}\n\nЦена: <b>{product['price']} руб.</b>\nВ наличии: {stock_text}"
     await safe_media_switch(call, "catalog.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data == "apply_promo")
 async def apply_promo_start(call: CallbackQuery, state: FSMContext):
@@ -415,6 +416,7 @@ async def apply_promo_start(call: CallbackQuery, state: FSMContext):
     kb = [[InlineKeyboardButton(text="Назад", callback_data=f"buy_{product_id}", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "catalog.jpg", "Отправьте промокод <b>НА СКИДКУ</b> в чат:", InlineKeyboardMarkup(inline_keyboard=kb))
     await state.set_state(UserBuyState.waiting_for_promo)
+    await call.answer()
 
 @dp.message(UserBuyState.waiting_for_promo)
 async def apply_promo_process(message: Message, state: FSMContext):
@@ -472,7 +474,6 @@ async def confirm_buy(call: CallbackQuery, state: FSMContext):
         await call.message.delete()
         await state.clear()
 
-        # Уведомление админам
         username = f"@{call.from_user.username}" if call.from_user.username else "Без юзернейма"
         admin_text = (
             f"🛍 <b>Новый заказ #{order_id}!</b>\n"
@@ -502,11 +503,14 @@ async def show_deposit_amounts(call: CallbackQuery):
     ui = db.get_ui()
     text = f"<tg-emoji emoji-id=\"{ui.get('E_DEPOSIT')}\">💰</tg-emoji> <b>Пополнение баланса</b>\n\nВыберите сумму:"
     await safe_media_switch(call, "deposit.jpg", text, inline_deposit_amounts())
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("dep_amt_"))
 async def deposit_amount_selected(call: CallbackQuery):
     amount = int(call.data.split("_")[2])
-    await safe_media_switch(call, "deposit.jpg", f"Выбрана сумма: <b>{amount} руб.</b>\nВыберите способ оплаты:", inline_deposit_methods(amount))
+    text = f"Выбрана сумма: <b>{amount} руб.</b>\nВыберите способ оплаты:"
+    await safe_media_switch(call, "deposit.jpg", text, inline_deposit_methods(amount))
+    await call.answer()
 
 @dp.callback_query(F.data == "dep_custom")
 async def deposit_custom_amount_start(call: CallbackQuery, state: FSMContext):
@@ -514,6 +518,7 @@ async def deposit_custom_amount_start(call: CallbackQuery, state: FSMContext):
     kb = [[InlineKeyboardButton(text="Назад", callback_data="nav_deposit", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "deposit.jpg", "Введите сумму пополнения в рублях:", InlineKeyboardMarkup(inline_keyboard=kb))
     await state.set_state(DepositFlow.waiting_for_custom_amount)
+    await call.answer()
 
 @dp.message(DepositFlow.waiting_for_custom_amount)
 async def deposit_custom_amount_entered(message: Message, state: FSMContext):
@@ -532,6 +537,7 @@ async def process_pay_sbp(call: CallbackQuery, state: FSMContext):
     kb = [[InlineKeyboardButton(text="Отменить", callback_data="nav_deposit", icon_custom_emoji_id=ui.get('E_DANGER'))]]
     await safe_media_switch(call, "deposit.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
     await state.set_state(DepositFlow.waiting_for_receipt)
+    await call.answer()
 
 @dp.message(DepositFlow.waiting_for_receipt, F.photo)
 async def deposit_sbp_receipt(message: Message, state: FSMContext):
@@ -563,6 +569,7 @@ async def process_pay_crypto(call: CallbackQuery):
           [InlineKeyboardButton(text="Проверить оплату", callback_data=f"check_crypto_{invoice.invoice_id}_{amount_rub}", icon_custom_emoji_id=ui.get('E_SUCCESS'))], 
           [InlineKeyboardButton(text="Назад", callback_data="nav_deposit", icon_custom_emoji_id=ui.get('E_BACK'))]]
     await safe_media_switch(call, "deposit.jpg", f"Сумма в рублях: {amount_rub} ₽\nК оплате: <b>{amount_usdt} USDT</b>", InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("check_crypto_"))
 async def check_crypto_payment(call: CallbackQuery):
@@ -617,6 +624,7 @@ async def admin_sbp_approve(call: CallbackQuery):
     if user and user['notifications']:
         try: await bot.send_message(user_id, f"✅ Ваш платеж по СБП подтвержден! Начислено {amount} руб.")
         except: pass
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("adm_sbp_no_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_sbp_reject(call: CallbackQuery):
@@ -626,6 +634,7 @@ async def admin_sbp_reject(call: CallbackQuery):
     if user and user['notifications']:
         try: await bot.send_message(user_id, "❌ Ваш платеж по СБП отклонен.")
         except: pass
+    await call.answer()
 
 # --- Настройки UI (Эмодзи) ---
 @dp.message(F.text == "🎨 Эмодзи интерфейса", F.from_user.id.in_(config.ADMIN_IDS))
@@ -650,6 +659,7 @@ async def admin_ui_edit(call: CallbackQuery, state: FSMContext):
     await state.update_data(ui_key=ui_key)
     await call.message.answer(f"Отправьте числовой ID (или сам Premium-эмодзи) для элемента <b>{ui_key}</b>:", parse_mode="HTML")
     await state.set_state(AdminUIState.waiting_for_emoji)
+    await call.answer()
 
 @dp.message(AdminUIState.waiting_for_emoji, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ui_save(message: Message, state: FSMContext):
@@ -684,6 +694,7 @@ async def admin_categories(message: Message):
 async def admin_add_cat_start(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Введите название:")
     await state.set_state(AdminCategoryState.waiting_for_name)
+    await call.answer()
 
 @dp.message(AdminCategoryState.waiting_for_name, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_cat_finish(message: Message, state: FSMContext):
@@ -701,6 +712,7 @@ async def admin_manage_category(call: CallbackQuery):
         [InlineKeyboardButton(text="Удалить категорию", callback_data=f"adm_del_cat_{cat_id}", icon_custom_emoji_id=ui.get('E_DANGER'))]
     ]
     await call.message.edit_text(f"Категория: <b>{cat['name']}</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("adm_edit_cat_emoji_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_edit_cat_emoji(call: CallbackQuery, state: FSMContext):
@@ -708,6 +720,7 @@ async def admin_edit_cat_emoji(call: CallbackQuery, state: FSMContext):
     await state.update_data(cat_id=cat_id)
     await call.message.answer("Отправьте числовой ID (или сам Premium-эмодзи) для этой категории:")
     await state.set_state(AdminCategoryEditState.waiting_for_emoji)
+    await call.answer()
 
 @dp.message(AdminCategoryEditState.waiting_for_emoji, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_save_cat_emoji(message: Message, state: FSMContext):
@@ -729,8 +742,8 @@ async def admin_save_cat_emoji(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("adm_del_cat_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_del_cat(call: CallbackQuery):
     db.delete_category(int(call.data.split("_")[3]))
-    await call.answer("Удалено.", show_alert=True)
     await call.message.delete()
+    await call.answer("Удалено.", show_alert=True)
 
 # --- Товары ---
 @dp.message(F.text == "Товары", F.from_user.id.in_(config.ADMIN_IDS))
@@ -751,12 +764,14 @@ async def admin_manage_products_in_cat(call: CallbackQuery):
         stock_text = "∞" if p['is_infinite'] else str(p['stock'])
         kb.append([InlineKeyboardButton(text=f"{p['name']} ({stock_text}шт)", callback_data=f"adm_prod_{p['id']}", icon_custom_emoji_id=p['emoji_id'] or ui.get('E_DEFAULT'))])
     await call.message.edit_text("Товары:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("adm_add_prod_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_product_name(call: CallbackQuery, state: FSMContext):
     await state.update_data(cat_id=int(call.data.split("_")[3]))
     await call.message.answer("Название товара:")
     await state.set_state(AdminProductState.waiting_for_name)
+    await call.answer()
 
 @dp.message(AdminProductState.waiting_for_name, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_product_desc(message: Message, state: FSMContext):
@@ -799,6 +814,7 @@ async def admin_manage_product(call: CallbackQuery):
         [InlineKeyboardButton(text="Удалить", callback_data=f"del_prod_{product_id}", icon_custom_emoji_id=ui.get('E_DANGER'))]
     ]
     await call.message.edit_text(f"Товар: <b>{product['name']}</b>\nЦена: {product['price']}₽\nВ наличии: {stock_txt}", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+    await call.answer()
 
 @dp.callback_query(F.data.startswith("toggle_inf_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_toggle_infinite(call: CallbackQuery):
@@ -811,6 +827,7 @@ async def admin_edit_inf_content(call: CallbackQuery, state: FSMContext):
     await state.update_data(edit_product_id=int(call.data.split("_")[2]))
     await call.message.answer("Отправьте текст, фото, документ, аудио или видео для бесконечного товара:")
     await state.set_state(AdminEditProductState.waiting_for_infinite_content)
+    await call.answer()
 
 @dp.message(AdminEditProductState.waiting_for_infinite_content, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_save_inf_content(message: Message, state: FSMContext):
@@ -845,6 +862,7 @@ async def admin_edit_product_start(call: CallbackQuery, state: FSMContext):
     elif edit_field == "emoji":
         await call.message.answer("Отправьте числовой ID (или сам Premium-эмодзи):")
         await state.set_state(AdminEditProductState.waiting_for_emoji)
+    await call.answer()
 
 @dp.message(AdminEditProductState.waiting_for_emoji, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_edit_prod_emoji(message: Message, state: FSMContext):
@@ -888,12 +906,14 @@ async def admin_edit_prod_price(message: Message, state: FSMContext):
 async def admin_delete_product(call: CallbackQuery):
     db.delete_product(int(call.data.split("_")[2]))
     await call.message.delete()
+    await call.answer("Удалено.", show_alert=True)
 
 @dp.callback_query(F.data.startswith("add_items_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_items_start(call: CallbackQuery, state: FSMContext):
     await state.update_data(product_id=int(call.data.split("_")[2]))
     await call.message.answer("Отправьте данные (одно сообщение = один товар).\nДля завершения: /stop")
     await state.set_state(AdminItemState.waiting_for_content)
+    await call.answer()
 
 @dp.message(AdminItemState.waiting_for_content, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_items_process(message: Message, state: FSMContext):
@@ -931,14 +951,15 @@ async def admin_add_promo_type(call: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="На скидку при покупке", callback_data="adm_pt_discount", icon_custom_emoji_id=ui.get('E_CATALOG'))]
     ]
     await call.message.edit_text("Выберите тип промокода:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-    await state.set_state(AdminPromoState.waiting_for_type)
+    await call.answer()
 
-@dp.callback_query(AdminPromoState.waiting_for_type, F.data.startswith("adm_pt_"), F.from_user.id.in_(config.ADMIN_IDS))
+@dp.callback_query(F.data.startswith("adm_pt_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_promo_start(call: CallbackQuery, state: FSMContext):
     promo_type = call.data.split("_")[2]
     await state.update_data(promo_type=promo_type)
     await call.message.edit_text("Введите текст (например: SALE10):")
     await state.set_state(AdminPromoState.waiting_for_code)
+    await call.answer()
 
 @dp.message(AdminPromoState.waiting_for_code, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_promo_value(message: Message, state: FSMContext):
@@ -955,8 +976,8 @@ async def admin_add_promo_uses(message: Message, state: FSMContext):
 @dp.message(AdminPromoState.waiting_for_uses, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_promo_finish(message: Message, state: FSMContext):
     data = await state.get_data()
-    t = "пополняет баланс" if data['promo_type'] == 'balance' else "дает скидку"
-    success = db.add_promocode(data['code'], data['promo_type'], data['discount'], int(message.text))
+    t = "пополняет баланс" if data.get('promo_type') == 'balance' else "дает скидку"
+    success = db.add_promocode(data['code'], data.get('promo_type', 'discount'), data['discount'], int(message.text))
     if success: await message.answer(f"✅ Создан.")
     else: await message.answer("❌ Такой код уже есть.")
     await state.clear()
@@ -965,6 +986,7 @@ async def admin_add_promo_finish(message: Message, state: FSMContext):
 async def admin_del_promo(call: CallbackQuery):
     db.delete_promocode(int(call.data.split("_")[3]))
     await call.message.delete()
+    await call.answer("Удалено.", show_alert=True)
 
 @dp.message(F.text == "Пользователи", F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_users_start(message: Message, state: FSMContext):
@@ -991,12 +1013,14 @@ async def admin_toggle_block(call: CallbackQuery):
     _, _, user_id, is_blocked = call.data.split("_")
     db.set_block_status(int(user_id), 0 if int(is_blocked) == 1 else 1)
     await call.message.delete()
+    await call.answer("Статус изменен.", show_alert=True)
 
 @dp.callback_query(F.data.startswith("adm_bal_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_change_bal(call: CallbackQuery, state: FSMContext):
     await state.update_data(target_user=call.data.split("_")[2])
     await call.message.answer("Сумма (+ добавить, - отнять):")
     await state.set_state(AdminUserState.waiting_for_new_balance)
+    await call.answer()
 
 @dp.message(AdminUserState.waiting_for_new_balance, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_update_bal(message: Message, state: FSMContext):
@@ -1019,13 +1043,14 @@ async def admin_ga_list(call: CallbackQuery):
     text = "📋 <b>Активные:</b>\n\n"
     for ga in gas: text += f"ID {ga['id']} | Приз: {ga['prize_value']}₽\n"
     await call.message.edit_text(text, parse_mode="HTML")
+    await call.answer()
 
 @dp.callback_query(F.data == "adm_ga_create", F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ga_create_start(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("Тип:", reply_markup=giveaway_type_ikb())
-    await state.set_state(AdminGiveawayState.waiting_for_type)
+    await call.answer()
 
-@dp.callback_query(AdminGiveawayState.waiting_for_type, F.data.startswith("ga_type_"), F.fromuser.id.in_(config.ADMIN_IDS))
+@dp.callback_query(F.data.startswith("ga_type_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ga_type(call: CallbackQuery, state: FSMContext):
     ga_type = call.data.replace("ga_type_", "")
     await state.update_data(ga_type=ga_type)
@@ -1036,7 +1061,7 @@ async def admin_ga_type(call: CallbackQuery, state: FSMContext):
         ui = db.get_ui()
         kb = [[InlineKeyboardButton(text=p['name'], callback_data=f"ga_prod_{p['id']}", icon_custom_emoji_id=ui.get('E_CATALOG'))] for p in products]
         await call.message.edit_text("Выберите товар:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-    await state.set_state(AdminGiveawayState.waiting_for_target)
+    await call.answer()
 
 @dp.message(AdminGiveawayState.waiting_for_target, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ga_target_msg(message: Message, state: FSMContext):
@@ -1044,16 +1069,16 @@ async def admin_ga_target_msg(message: Message, state: FSMContext):
     await message.answer("Длительность в ЧАСАХ:")
     await state.set_state(AdminGiveawayState.waiting_for_duration)
 
-@dp.callback_query(AdminGiveawayState.waiting_for_target, F.data.startswith("ga_prod_"), F.from_user.id.in_(config.ADMIN_IDS))
+@dp.callback_query(F.data.startswith("ga_prod_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ga_target_call(call: CallbackQuery, state: FSMContext):
     await state.update_data(target_val=int(call.data.replace("ga_prod_", "")))
     data = await state.get_data()
-    if data['ga_type'] == 'first_buy':
+    if data.get('ga_type') == 'first_buy':
         await call.message.edit_text("Вид бонуса?", reply_markup=prize_type_ikb())
-        await state.set_state(AdminGiveawayState.waiting_for_prize_type)
     else:
         await call.message.edit_text("Длительность в ЧАСАХ:")
         await state.set_state(AdminGiveawayState.waiting_for_duration)
+    await call.answer()
 
 @dp.message(AdminGiveawayState.waiting_for_duration, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ga_duration(message: Message, state: FSMContext):
@@ -1066,13 +1091,13 @@ async def admin_ga_duration(message: Message, state: FSMContext):
 async def admin_ga_winners(message: Message, state: FSMContext):
     await state.update_data(winners=int(message.text))
     await message.answer("Вид приза?", reply_markup=prize_type_ikb())
-    await state.set_state(AdminGiveawayState.waiting_for_prize_type)
 
-@dp.callback_query(AdminGiveawayState.waiting_for_prize_type, F.data.startswith("ga_prize_"), F.from_user.id.in_(config.ADMIN_IDS))
+@dp.callback_query(F.data.startswith("ga_prize_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ga_prize_type(call: CallbackQuery, state: FSMContext):
     await state.update_data(prize_type=call.data.replace("ga_prize_", ""))
     await call.message.edit_text("Сумма приза (в рублях):")
     await state.set_state(AdminGiveawayState.waiting_for_prize_value)
+    await call.answer()
 
 @dp.message(AdminGiveawayState.waiting_for_prize_value, F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_ga_finish(message: Message, state: FSMContext):
@@ -1081,12 +1106,11 @@ async def admin_ga_finish(message: Message, state: FSMContext):
     await message.answer("✅ Розыгрыш создан.")
     await state.clear()
 
-
 @dp.message(F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_catch_all_emoji_and_stickers(message: Message, state: FSMContext):
     if await state.get_state() is not None: return 
     if message.sticker:
-        return await message.answer(f"✅ <b>СТИКЕР!</b> ID:\n<code>{message.sticker.file_id}</code>\nВставлять так:\n<code>await message.answer_sticker(\"{message.sticker.file_id}\")</code>", parse_mode="HTML")
+        return await message.answer(f"✅ <b>СТИКЕР!</b> ID:\n<code>{message.sticker.file_id}</code>", parse_mode="HTML")
     custom_emojis = [ent for ent in message.entities or [] if ent.type == "custom_emoji"]
     if custom_emojis:
         codes = "\n\n".join([f'&lt;tg-emoji emoji-id="{e.custom_emoji_id}"&gt;💳&lt;/tg-emoji&gt;' for e in custom_emojis])
