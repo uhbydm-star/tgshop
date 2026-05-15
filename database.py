@@ -37,7 +37,7 @@ def init_db():
     cat_cols = [row['name'] for row in c.fetchall()]
     if 'emoji_id' not in cat_cols: c.execute("ALTER TABLE categories ADD COLUMN emoji_id TEXT")
 
-    # 4. ТОВАРЫ (добавлен тип для бесконечного контента)
+    # 4. ТОВАРЫ
     c.execute('''CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER, name TEXT, description TEXT, price REAL)''')
     c.execute("PRAGMA table_info(products)")
     prod_cols = [row['name'] for row in c.fetchall()]
@@ -65,7 +65,7 @@ def init_db():
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO ui_settings (key, emoji_id) VALUES (?, ?)", (k, v))
 
-    # 6. СКЛАД ТОВАРОВ (добавлен тип файла)
+    # 6. СКЛАД ТОВАРОВ
     c.execute('''CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, content TEXT)''')
     c.execute("PRAGMA table_info(items)")
     item_cols = [row['name'] for row in c.fetchall()]
@@ -85,6 +85,28 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+# --- СТАТИСТИКА АДМИНА ---
+def get_statistics():
+    conn = get_connection()
+    c = conn.cursor()
+    stats = {}
+    
+    # Считаем за 7, 15, 30 дней
+    for days in [7, 15, 30]:
+        c.execute(f"SELECT SUM(amount) as total FROM deposit_history WHERE date_time >= datetime('now', '-{days} days')")
+        dep_total = c.fetchone()['total'] or 0
+        
+        c.execute(f"SELECT SUM(price) as total FROM orders WHERE date_time >= datetime('now', '-{days} days')")
+        ord_total = c.fetchone()['total'] or 0
+        
+        stats[days] = {'deposits': round(dep_total, 2), 'orders': round(ord_total, 2)}
+        
+    c.execute("SELECT COUNT(id) as count FROM users")
+    stats['users'] = c.fetchone()['count'] or 0
+    
+    conn.close()
+    return stats
 
 # --- UI ЭМОДЗИ ---
 def get_ui():
@@ -297,32 +319,34 @@ def buy_item(user_id, product_id, promo_code=None):
     prod = c.fetchone()
     if not prod:
         conn.close()
-        return False, "Товар не найден.", None, [], 0
+        return False, "Товар не найден.", None, [], 0, 0
         
     price = prod['price']
     final_price = price
     
+    # Обработка промокода
     promo_data = None
     if promo_code:
         c.execute("SELECT * FROM promocodes WHERE code = ?", (promo_code,))
         promo_data = c.fetchone()
         if not promo_data:
             conn.close()
-            return False, "Промокод не найден.", None, [], 0
+            return False, "Промокод не найден.", None, [], 0, 0
         if promo_data['uses_left'] <= 0:
             conn.close()
-            return False, "Активации этого промокода закончились.", None, [], 0
+            return False, "Активации этого промокода закончились.", None, [], 0, 0
         c.execute("SELECT 1 FROM used_promos WHERE user_id = ? AND promo_id = ?", (user_id, promo_data['id']))
         if c.fetchone():
             conn.close()
-            return False, "Вы уже использовали этот промокод.", None, [], 0
+            return False, "Вы уже использовали этот промокод.", None, [], 0, 0
         final_price = max(0, price - promo_data['discount'])
     
+    # Проверка баланса
     c.execute("SELECT balance FROM users WHERE id = ?", (user_id,))
     balance = c.fetchone()['balance']
     if balance < final_price:
         conn.close()
-        return False, f"Недостаточно средств. Цена товара: {final_price} руб.", None, [], 0
+        return False, f"Недостаточно средств. Цена товара: {final_price} руб.", None, [], 0, 0
     
     item_content = ""
     item_content_type = "text"
@@ -330,7 +354,7 @@ def buy_item(user_id, product_id, promo_code=None):
     if prod['is_infinite']:
         if not prod['infinite_content']:
             conn.close()
-            return False, "Содержимое этого товара еще не настроено администратором.", None, [], 0
+            return False, "Содержимое этого товара еще не настроено администратором.", None, [], 0, 0
         item_content = prod['infinite_content']
         item_content_type = prod['infinite_content_type']
     else:
@@ -338,13 +362,16 @@ def buy_item(user_id, product_id, promo_code=None):
         item = c.fetchone()
         if not item:
             conn.close()
-            return False, "Товар закончился.", None, [], 0
+            return False, "Товар закончился.", None, [], 0, 0
         item_content = item['content']
         item_content_type = item['content_type']
         c.execute("DELETE FROM items WHERE id = ?", (item['id'],))
     
     c.execute("UPDATE users SET balance = balance - ?, purchases = purchases + 1, spent = spent + ? WHERE id = ?", (final_price, final_price, user_id))
+    
+    # Добавляем заказ и получаем его ID
     c.execute("INSERT INTO orders (user_id, product_name, price, content, content_type) VALUES (?, ?, ?, ?, ?)", (user_id, prod['name'], final_price, item_content, item_content_type))
+    order_id = c.lastrowid
 
     if promo_data:
         c.execute("UPDATE promocodes SET uses_left = uses_left - 1 WHERE id = ?", (promo_data['id'],))
@@ -366,7 +393,7 @@ def buy_item(user_id, product_id, promo_code=None):
 
     conn.commit()
     conn.close()
-    return True, item_content, item_content_type, immediate_wins, final_price
+    return True, item_content, item_content_type, immediate_wins, final_price, order_id
 
 # --- Промокоды ---
 def add_promocode(code, promo_type, discount, uses):

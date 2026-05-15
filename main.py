@@ -181,7 +181,7 @@ def admin_menu():
         [KeyboardButton(text="Категории", icon_custom_emoji_id=ui.get('E_CATALOG')), KeyboardButton(text="Товары", icon_custom_emoji_id=ui.get('E_CATALOG'))],
         [KeyboardButton(text="Пользователи", icon_custom_emoji_id=ui.get('E_PROFILE')), KeyboardButton(text="Промокоды", icon_custom_emoji_id=ui.get('E_DEFAULT'))],
         [KeyboardButton(text="Розыгрыши", icon_custom_emoji_id=ui.get('E_SUCCESS')), KeyboardButton(text="🎨 Эмодзи интерфейса", icon_custom_emoji_id=ui.get('E_DEFAULT'))],
-        [KeyboardButton(text="Выйти из админки", icon_custom_emoji_id=ui.get('E_DANGER'))]
+        [KeyboardButton(text="📊 Статистика", icon_custom_emoji_id=ui.get('E_DEFAULT')), KeyboardButton(text="Выйти из админки", icon_custom_emoji_id=ui.get('E_DANGER'))]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -260,12 +260,7 @@ async def process_accept_offer(call: CallbackQuery):
 @dp.callback_query(F.data == "nav_main")
 async def edit_to_main_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
-    await safe_media_switch(
-        call, 
-        "image_af4e21.jpg", 
-        get_main_menu_text(call.from_user.first_name), 
-        inline_main_menu()
-    )
+    await safe_media_switch(call, "image_af4e21.jpg", get_main_menu_text(call.from_user.first_name), inline_main_menu())
 
 @dp.callback_query(F.data == "nav_support")
 async def show_support(call: CallbackQuery):
@@ -463,25 +458,31 @@ async def confirm_buy(call: CallbackQuery, state: FSMContext):
     product = db.get_product(product_id)
     if not product: return await call.answer("Товар удален.", show_alert=True)
          
-    success, result, c_type, immediate_wins, final_price = db.buy_item(call.from_user.id, product_id, promo_code)
+    success, result, c_type, immediate_wins, final_price, order_id = db.buy_item(call.from_user.id, product_id, promo_code)
     
     if success:
         await call.message.answer(f"✅ Покупка успешна! Списано <b>{final_price} руб.</b>\n\nВаш товар ниже:", parse_mode="HTML")
         
-        # Выдаем файл или текст
-        if c_type == 'text':
-            await call.message.answer(f"<code>{result}</code>", parse_mode="HTML")
-        elif c_type == 'document':
-            await call.message.answer_document(result)
-        elif c_type == 'photo':
-            await call.message.answer_photo(result)
-        elif c_type == 'video':
-            await call.message.answer_video(result)
-        elif c_type == 'audio':
-            await call.message.answer_audio(result)
+        if c_type == 'text': await call.message.answer(f"<code>{result}</code>", parse_mode="HTML")
+        elif c_type == 'document': await call.message.answer_document(result)
+        elif c_type == 'photo': await call.message.answer_photo(result)
+        elif c_type == 'video': await call.message.answer_video(result)
+        elif c_type == 'audio': await call.message.answer_audio(result)
             
         await call.message.delete()
         await state.clear()
+
+        # Уведомление админам
+        username = f"@{call.from_user.username}" if call.from_user.username else "Без юзернейма"
+        admin_text = (
+            f"🛍 <b>Новый заказ #{order_id}!</b>\n"
+            f"👤 Покупатель: {username} (<code>{call.from_user.id}</code>)\n"
+            f"📦 Товар: <b>{product['name']}</b>\n"
+            f"💰 Сумма: <b>{final_price} руб.</b>\n"
+        )
+        for admin_id in config.ADMIN_IDS:
+            try: await bot.send_message(admin_id, admin_text, parse_mode="HTML")
+            except: pass
         
         for ga in immediate_wins:
             if ga['prize_type'] == 'promo':
@@ -588,6 +589,24 @@ async def admin_start(message: Message):
 @dp.message(F.text == "Выйти из админки", F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_exit(message: Message):
     await message.answer("Вы вышли.", reply_markup=persistent_menu())
+
+@dp.message(F.text == "📊 Статистика", F.from_user.id.in_(config.ADMIN_IDS))
+async def admin_statistics(message: Message):
+    stats = db.get_statistics()
+    text = (
+        f"📊 <b>Статистика магазина</b>\n\n"
+        f"👥 Всего пользователей: <b>{stats['users']}</b>\n\n"
+        f"📅 <b>За 7 дней:</b>\n"
+        f"Пополнений: {stats[7]['deposits']}₽\n"
+        f"Сумма продаж: {stats[7]['orders']}₽\n\n"
+        f"📅 <b>За 15 дней:</b>\n"
+        f"Пополнений: {stats[15]['deposits']}₽\n"
+        f"Сумма продаж: {stats[15]['orders']}₽\n\n"
+        f"📅 <b>За 30 дней:</b>\n"
+        f"Пополнений: {stats[30]['deposits']}₽\n"
+        f"Сумма продаж: {stats[30]['orders']}₽\n"
+    )
+    await message.answer(text, parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("adm_sbp_ok_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_sbp_approve(call: CallbackQuery):
@@ -873,7 +892,7 @@ async def admin_delete_product(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("add_items_"), F.from_user.id.in_(config.ADMIN_IDS))
 async def admin_add_items_start(call: CallbackQuery, state: FSMContext):
     await state.update_data(product_id=int(call.data.split("_")[2]))
-    await call.message.answer("Отправьте текст, фото, видео, файл или документ.\nОдно сообщение = одна единица товара.\nДля завершения: /stop")
+    await call.message.answer("Отправьте данные (одно сообщение = один товар).\nДля завершения: /stop")
     await state.set_state(AdminItemState.waiting_for_content)
 
 @dp.message(AdminItemState.waiting_for_content, F.from_user.id.in_(config.ADMIN_IDS))
@@ -1006,7 +1025,7 @@ async def admin_ga_create_start(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("Тип:", reply_markup=giveaway_type_ikb())
     await state.set_state(AdminGiveawayState.waiting_for_type)
 
-@dp.callback_query(AdminGiveawayState.waiting_for_type, F.data.startswith("ga_type_"), F.from_user.id.in_(config.ADMIN_IDS))
+@dp.callback_query(AdminGiveawayState.waiting_for_type, F.data.startswith("ga_type_"), F.fromuser.id.in_(config.ADMIN_IDS))
 async def admin_ga_type(call: CallbackQuery, state: FSMContext):
     ga_type = call.data.replace("ga_type_", "")
     await state.update_data(ga_type=ga_type)
@@ -1062,6 +1081,16 @@ async def admin_ga_finish(message: Message, state: FSMContext):
     await message.answer("✅ Розыгрыш создан.")
     await state.clear()
 
+
+@dp.message(F.from_user.id.in_(config.ADMIN_IDS))
+async def admin_catch_all_emoji_and_stickers(message: Message, state: FSMContext):
+    if await state.get_state() is not None: return 
+    if message.sticker:
+        return await message.answer(f"✅ <b>СТИКЕР!</b> ID:\n<code>{message.sticker.file_id}</code>\nВставлять так:\n<code>await message.answer_sticker(\"{message.sticker.file_id}\")</code>", parse_mode="HTML")
+    custom_emojis = [ent for ent in message.entities or [] if ent.type == "custom_emoji"]
+    if custom_emojis:
+        codes = "\n\n".join([f'&lt;tg-emoji emoji-id="{e.custom_emoji_id}"&gt;💳&lt;/tg-emoji&gt;' for e in custom_emojis])
+        return await message.answer(f"✅ <b>Эмодзи найдены!</b>\n\n<code>{codes}</code>", parse_mode="HTML")
 
 async def check_giveaways_task(bot_instance: Bot):
     while True:
