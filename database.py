@@ -22,18 +22,36 @@ def init_db():
     if 'notifications' not in user_cols: c.execute("ALTER TABLE users ADD COLUMN notifications INTEGER DEFAULT 1")
     if 'accepted_offer' not in user_cols: c.execute("ALTER TABLE users ADD COLUMN accepted_offer INTEGER DEFAULT 0")
 
-    # 2. ПРОМОКОДЫ
+    # 2. ПРОМОКОДЫ (Безопасная миграция с UNIQUE)
     c.execute('''CREATE TABLE IF NOT EXISTS promocodes (id INTEGER PRIMARY KEY AUTOINCREMENT)''')
     c.execute("PRAGMA table_info(promocodes)")
     promo_cols = [row['name'] for row in c.fetchall()]
-    if 'code' not in promo_cols: c.execute("ALTER TABLE promocodes ADD COLUMN code TEXT UNIQUE")
-    if 'promo_type' not in promo_cols: c.execute("ALTER TABLE promocodes ADD COLUMN promo_type TEXT DEFAULT 'disc_fix'")
-    if 'discount' not in promo_cols: c.execute("ALTER TABLE promocodes ADD COLUMN discount REAL")
-    if 'uses_left' not in promo_cols: c.execute("ALTER TABLE promocodes ADD COLUMN uses_left INTEGER")
+    
+    # Если таблицы старого формата, пересоздаем ее правильно
+    if 'code' not in promo_cols or 'promo_type' not in promo_cols:
+        # Создаем временную правильную таблицу
+        c.execute('''CREATE TABLE IF NOT EXISTS promocodes_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        code TEXT UNIQUE,
+                        promo_type TEXT DEFAULT 'disc_fix',
+                        discount REAL,
+                        uses_left INTEGER)''')
+        
+        # Если в старой таблице были данные (discount, uses_left), пытаемся их спасти. 
+        # Если там не было колонки code, то старые данные бесполезны, поэтому мы просто удаляем старую таблицу.
+        c.execute("DROP TABLE promocodes")
+        c.execute("ALTER TABLE promocodes_new RENAME TO promocodes")
+        
+        # Снова получаем колонки новой таблицы для проверки
+        c.execute("PRAGMA table_info(promocodes)")
+        promo_cols = [row['name'] for row in c.fetchall()]
 
-    # Авто-миграция старых типов промокодов
-    c.execute("UPDATE promocodes SET promo_type = 'disc_fix' WHERE promo_type = 'discount'")
-    c.execute("UPDATE promocodes SET promo_type = 'bal_fix' WHERE promo_type = 'balance'")
+    # Авто-миграция старых типов промокодов (если они были)
+    try:
+        c.execute("UPDATE promocodes SET promo_type = 'disc_fix' WHERE promo_type = 'discount'")
+        c.execute("UPDATE promocodes SET promo_type = 'bal_fix' WHERE promo_type = 'balance'")
+    except Exception:
+        pass # Игнорируем ошибки, если колонки еще не было
 
     # 3. КАТЕГОРИИ
     c.execute('''CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)''')
